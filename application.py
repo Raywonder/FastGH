@@ -11,6 +11,7 @@ import tempfile
 import shutil
 import config
 import wx
+import wx.adv
 import requests
 from version import APP_NAME, APP_SHORTNAME, APP_VERSION, APP_AUTHOR
 from repo_sync import RepoSyncManager
@@ -19,6 +20,36 @@ shortname = APP_SHORTNAME
 name = APP_NAME
 version = APP_VERSION
 author = APP_AUTHOR
+DEFAULT_UPDATE_REPO = os.environ.get("FASTGH_UPDATE_REPO", "raywonder/FastGH")
+
+
+def _install_macos_wx_raise_guard():
+    """Disable wx Raise() on macOS to avoid Cocoa null-deref crashes."""
+    if platform.system() != "Darwin":
+        return
+    if getattr(wx, "_fastgh_raise_guard_installed", False):
+        return
+
+    def _safe_raise(self):
+        try:
+            if hasattr(self, "SetFocus"):
+                self.SetFocus()
+        except Exception:
+            pass
+        return None
+
+    for cls_name in ("TopLevelWindow", "Dialog", "Frame"):
+        cls = getattr(wx, cls_name, None)
+        if cls is not None and hasattr(cls, "Raise"):
+            try:
+                setattr(cls, "Raise", _safe_raise)
+            except Exception:
+                pass
+
+    wx._fastgh_raise_guard_installed = True
+
+
+_install_macos_wx_raise_guard()
 
 
 class Application:
@@ -97,6 +128,7 @@ class Application:
         self.prefs.git_lfs_enabled = self.prefs.get("git_lfs_enabled", True)
 
         # OS notification settings
+        self.prefs.notification_delivery = self.prefs.get("notification_delivery", "push")
         self.prefs.notify_activity = self.prefs.get("notify_activity", False)
         self.prefs.notify_notifications = self.prefs.get("notify_notifications", False)
         self.prefs.notify_starred = self.prefs.get("notify_starred", False)
@@ -120,6 +152,10 @@ class Application:
 
         # Check for updates on startup
         self.prefs.check_for_updates = self.prefs.get("check_for_updates", True)
+        self.prefs.update_channel = self.prefs.get(
+            "update_channel",
+            f"https://api.github.com/repos/{DEFAULT_UPDATE_REPO}/releases"
+        )
 
         # Load accounts
         if self.prefs.accounts > 0:
@@ -242,12 +278,26 @@ class Application:
 
     def alert_from_thread(self, message, caption=""):
         """Show an alert dialog from a background thread."""
+        if self.prefs.notification_delivery == "none":
+            return
         event = threading.Event()
         def show_dialog():
-            self.alert(message, caption)
+            if self.prefs.notification_delivery == "push":
+                self.push_notification(caption or APP_NAME, message)
+            else:
+                self.alert(message, caption)
             event.set()
         wx.CallAfter(show_dialog)
         event.wait()
+
+    def push_notification(self, title, message, timeout=5):
+        """Show a desktop push notification."""
+        try:
+            notification = wx.adv.NotificationMessage(title, message)
+            notification.SetFlags(wx.ICON_INFORMATION)
+            notification.Show(timeout=timeout)
+        except Exception as e:
+            print(f"Notification error: {e}")
 
     def _get_local_build_commit(self):
         """Get the commit SHA from the build_info.txt file."""
@@ -286,6 +336,35 @@ class Application:
                         if progress_callback:
                             progress_callback(downloaded, total_size)
 
+    def _resolve_update_channel_url(self) -> str:
+        """Resolve update channel configured as full URL or owner/repo shorthand."""
+        channel = (self.prefs.get("update_channel", "") if self.prefs else "").strip()
+        if not channel:
+            return f"https://api.github.com/repos/{DEFAULT_UPDATE_REPO}/releases"
+        if "://" in channel:
+            return channel
+        if "/" in channel:
+            return f"https://api.github.com/repos/{channel}/releases"
+        return channel
+
+    def _load_releases_from_channel(self):
+        """Load and normalize releases from configured channel."""
+        channel_url = self._resolve_update_channel_url()
+        payload = requests.get(
+            channel_url,
+            headers={"accept": "application/vnd.github.v3+json"},
+            timeout=20
+        ).json()
+
+        if isinstance(payload, list):
+            return payload, channel_url
+        if isinstance(payload, dict):
+            if isinstance(payload.get("releases"), list):
+                return payload["releases"], channel_url
+            if isinstance(payload.get("latest"), dict):
+                return [payload["latest"]], channel_url
+        raise ValueError(f"Unsupported update channel payload: {channel_url}")
+
     def cfu(self, silent=True):
         """Check for updates."""
         # Don't run auto-updater when running from source
@@ -295,11 +374,7 @@ class Application:
             return
 
         try:
-            # Get releases from GitHub
-            releases = json.loads(requests.get(
-                "https://api.github.com/repos/masonasons/FastGH/releases",
-                headers={"accept": "application/vnd.github.v3+json"}
-            ).content.decode())
+            releases, channel_url = self._load_releases_from_channel()
 
             if not releases:
                 if not silent:
@@ -338,6 +413,7 @@ class Application:
                     pass
 
             if update_available:
+                delivery_mode = self.prefs.notification_delivery
                 message = "There is an update available.\n\n"
                 message += f"Your version: {version}"
                 if local_commit:
@@ -345,24 +421,29 @@ class Application:
                 message += f"\nLatest version: {latest_version}"
                 if release_commit:
                     message += f" (commit {release_commit[:8]})"
-                message += "\n\nDo you want to download and install the update?"
 
-                ud = self.question_from_thread("Update available: " + latest_version, message)
-                if ud == 1:
-                    for asset in latest['assets']:
-                        asset_name = asset['name'].lower()
-                        if platform.system() == "Windows" and 'windows' in asset_name and asset_name.endswith('.zip'):
-                            threading.Thread(target=self.download_update, args=[asset['browser_download_url']], daemon=True).start()
-                            return
-                        elif platform.system() == "Darwin" and asset_name.endswith('.dmg'):
-                            threading.Thread(target=self.download_update, args=[asset['browser_download_url']], daemon=True).start()
-                            return
-                    self.alert_from_thread("A download for this version could not be found for your platform.", "Error")
+                if delivery_mode == "alert":
+                    message += "\n\nDo you want to download and install the update?"
+                    ud = self.question_from_thread("Update available: " + latest_version, message)
+                    if ud == 1:
+                        for asset in latest['assets']:
+                            asset_name = asset['name'].lower()
+                            if platform.system() == "Windows" and 'windows' in asset_name and asset_name.endswith('.zip'):
+                                threading.Thread(target=self.download_update, args=[asset['browser_download_url']], daemon=True).start()
+                                return
+                            elif platform.system() == "Darwin" and asset_name.endswith('.dmg'):
+                                threading.Thread(target=self.download_update, args=[asset['browser_download_url']], daemon=True).start()
+                                return
+                        self.alert_from_thread("A download for this version could not be found for your platform.", "Error")
+                elif delivery_mode == "push":
+                    push_message = message + "\n\nOpen Help > Check for Updates to install."
+                    wx.CallAfter(self.push_notification, f"Update available: {latest_version}", push_message)
             else:
-                if not silent:
+                if not silent and self.prefs.notification_delivery != "none":
                     message = f"You are running the latest version: {version}"
                     if local_commit:
                         message += f" (commit {local_commit[:8]})"
+                    message += f"\nChannel: {channel_url}"
                     self.alert_from_thread("No updates available!\n\n" + message, "No Update Available")
         except Exception as e:
             if not silent:
