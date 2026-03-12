@@ -205,6 +205,16 @@ class OptionsDialog(wx.Dialog):
         delivery_row.Add(self.notification_delivery_choice, 0)
         notif_sizer.Add(delivery_row, 0, wx.LEFT | wx.TOP, 10)
 
+        self.quit_to_tray_cb = wx.CheckBox(
+            self.panel,
+            label="Keep FastGH running in the status item when closing or quitting"
+        )
+        self.quit_to_tray_cb.SetToolTip(
+            "When enabled and a tray/status item is available, closing the window or quitting "
+            "will hide FastGH instead of fully exiting."
+        )
+        notif_sizer.Add(self.quit_to_tray_cb, 0, wx.LEFT | wx.TOP, 10)
+
         # Auto-refresh interval
         refresh_row = wx.BoxSizer(wx.HORIZONTAL)
 
@@ -362,6 +372,7 @@ class OptionsDialog(wx.Dialog):
             self.notification_delivery_choice.SetSelection(2)
         else:
             self.notification_delivery_choice.SetSelection(0)
+        self.quit_to_tray_cb.SetValue(bool(getattr(self.app.prefs, "quit_to_tray", False)))
         self.refresh_spin.SetValue(self.app.prefs.auto_refresh_interval)
 
         if HOTKEY_SUPPORTED:
@@ -407,6 +418,7 @@ class OptionsDialog(wx.Dialog):
             self.app.prefs.notification_delivery = "none"
         else:
             self.app.prefs.notification_delivery = "push"
+        self.app.prefs.quit_to_tray = self.quit_to_tray_cb.GetValue()
 
         old_interval = self.app.prefs.auto_refresh_interval
         new_interval = self.refresh_spin.GetValue()

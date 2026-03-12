@@ -100,7 +100,10 @@ class FileBrowserDialog(wx.Dialog):
         if key == wx.WXK_ESCAPE:
             self.on_close(None)
         elif key == wx.WXK_RETURN or key == wx.WXK_NUMPAD_ENTER:
-            self.activate_selected()
+            if platform.system() == "Darwin":
+                wx.CallAfter(self.activate_selected)
+            else:
+                self.activate_selected()
         elif key == wx.WXK_BACK:
             if self.path_history:
                 self.on_back(None)

@@ -1752,11 +1752,15 @@ class MainGui(wx.Frame):
 
     def on_close(self, event):
         """Handle window close - hide to tray/status item when available."""
-        if tray_icon:
+        if self._should_hide_to_tray():
             self.app.prefs.window_shown = False
             self.Hide()
         else:
             self.exit_app()
+
+    def _should_hide_to_tray(self):
+        """Return True when closing/quitting should hide to tray instead."""
+        return bool(tray_icon and getattr(self.app.prefs, "quit_to_tray", False))
 
     def on_hide(self, event):
         """Hide window to system tray."""
@@ -1855,7 +1859,11 @@ class MainGui(wx.Frame):
 
     def on_exit(self, event):
         """Exit application."""
-        self.exit_app()
+        if self._should_hide_to_tray():
+            self.app.prefs.window_shown = False
+            self.Hide()
+        else:
+            self.exit_app()
 
 
 def create_window():

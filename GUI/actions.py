@@ -347,7 +347,10 @@ class ActionsDialog(wx.Dialog):
         """Handle key events."""
         key = event.GetKeyCode()
         if key == wx.WXK_RETURN:
-            self.on_view(None)
+            if platform.system() == "Darwin":
+                wx.CallAfter(self.on_view, None)
+            else:
+                self.on_view(None)
         else:
             event.Skip()
 

@@ -1,6 +1,7 @@
 """Forks dialog for FastGH."""
 
 import wx
+import platform
 import threading
 from application import get_app
 from models.repository import Repository
@@ -78,7 +79,10 @@ class ForksDialog(wx.Dialog):
     def on_list_key(self, event):
         """Handle key events in the list."""
         if event.GetKeyCode() == wx.WXK_RETURN:
-            self.on_view_fork(None)
+            if platform.system() == "Darwin":
+                wx.CallAfter(self.on_view_fork, None)
+            else:
+                self.on_view_fork(None)
         else:
             event.Skip()
 

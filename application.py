@@ -133,6 +133,7 @@ class Application:
         self.prefs.notify_notifications = self.prefs.get("notify_notifications", False)
         self.prefs.notify_starred = self.prefs.get("notify_starred", False)
         self.prefs.notify_watched = self.prefs.get("notify_watched", False)
+        self.prefs.quit_to_tray = self.prefs.get("quit_to_tray", platform.system() == "Darwin")
 
         # Auto-refresh interval in minutes (0 = disabled)
         self.prefs.auto_refresh_interval = self.prefs.get("auto_refresh_interval", 0)
