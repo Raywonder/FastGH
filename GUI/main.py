@@ -772,7 +772,12 @@ class MainGui(wx.Frame):
                     wx.CallAfter(self.status_bar.SetStatusText, summary)
                     if self.app.prefs.repo_sync_notify:
                         first = failed[0]
-                        wx.CallAfter(self.show_notification, "Repo Sync Errors", f"{summary}. First failure: {first.repo}")
+                        detail = first.message.strip().replace("\n", " | ")
+                        wx.CallAfter(
+                            self.show_notification,
+                            "Repo Sync Errors",
+                            f"{summary}. First failure: {first.repo} - {detail}"
+                        )
                 else:
                     summary = f"Repo sync: {len(results)} repositories synced"
                     wx.CallAfter(self.status_bar.SetStatusText, summary)

@@ -339,7 +339,8 @@ class Application:
 
     def _resolve_update_channel_url(self) -> str:
         """Resolve update channel configured as full URL or owner/repo shorthand."""
-        channel = (self.prefs.get("update_channel", "") if self.prefs else "").strip()
+        channel_value = self.prefs.get("update_channel", "") if self.prefs else ""
+        channel = str(channel_value or "").strip()
         if not channel:
             return f"https://api.github.com/repos/{DEFAULT_UPDATE_REPO}/releases"
         if "://" in channel:

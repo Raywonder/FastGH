@@ -134,6 +134,12 @@ class RepoSyncManager:
             incoming_count = self._incoming_count(repo_path)
             os_hints = self._detect_cross_os_hints(repo_path) if incoming_count > 0 else []
             if auto_pull:
+                if self._has_uncommitted_changes(repo_path):
+                    return RepoSyncResult(
+                        repo_label,
+                        False,
+                        f"Skipped pull for dirty working tree: {repo_path}"
+                    )
                 self._run_git(repo_path, ["pull", "--ff-only"])
                 self._run_lfs_sync(repo_path)
             push_message = "push disabled"
