@@ -2,7 +2,9 @@
 
 import time
 import threading
+import os
 from datetime import datetime
+from urllib.parse import urlencode
 import requests
 import config
 import wx
@@ -24,6 +26,30 @@ GITHUB_CLIENT_ID = "Ov23liErbWGLzAKTlLFW"  # Replace with your client ID
 
 # GitHub API base URL
 GITHUB_API_URL = "https://api.github.com"
+GITHUB_WEB_URL = "https://github.com"
+
+
+def normalize_api_url(url: str) -> str:
+    """Normalize a Git service API base URL."""
+    url = (url or GITHUB_API_URL).strip().rstrip("/")
+    if not url:
+        return GITHUB_API_URL
+    if url.endswith("/api/v1") or url.endswith("/api/v3"):
+        return url
+    if "github.com" in url and "api.github.com" not in url:
+        return GITHUB_API_URL
+    return url.rstrip("/") + "/api/v1"
+
+
+def derive_web_url(api_url: str) -> str:
+    """Derive a browser base URL from a Git service API URL."""
+    api_url = normalize_api_url(api_url)
+    if api_url == GITHUB_API_URL:
+        return GITHUB_WEB_URL
+    for suffix in ("/api/v1", "/api/v3"):
+        if api_url.endswith(suffix):
+            return api_url[:-len(suffix)]
+    return api_url
 
 
 class AccountSetupCancelled(Exception):
@@ -90,6 +116,45 @@ class _AuthWaitDialog(wx.Dialog):
         self.cancelled = True
         self.EndModal(wx.ID_CANCEL)
 
+
+class _TokenAuthDialog(wx.Dialog):
+    """Prompt for a self-hosted Git service URL and token."""
+
+    def __init__(self, parent, default_api_url="", default_web_url=""):
+        super().__init__(parent, title="Self-hosted Git Service", size=(560, 300))
+        panel = wx.Panel(self)
+        sizer = wx.BoxSizer(wx.VERTICAL)
+
+        api_label = wx.StaticText(panel, label="&API URL:")
+        sizer.Add(api_label, 0, wx.LEFT | wx.RIGHT | wx.TOP, 12)
+        self.api_url = wx.TextCtrl(panel, value=default_api_url or "http://100.64.0.2:3090/api/v1")
+        sizer.Add(self.api_url, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.EXPAND, 12)
+
+        web_label = wx.StaticText(panel, label="&Web URL:")
+        sizer.Add(web_label, 0, wx.LEFT | wx.RIGHT, 12)
+        self.web_url = wx.TextCtrl(panel, value=default_web_url or "http://100.64.0.2:3090")
+        sizer.Add(self.web_url, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.EXPAND, 12)
+
+        token_label = wx.StaticText(panel, label="Access &token:")
+        sizer.Add(token_label, 0, wx.LEFT | wx.RIGHT, 12)
+        self.token = wx.TextCtrl(panel, style=wx.TE_PASSWORD)
+        sizer.Add(self.token, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.EXPAND, 12)
+
+        note = wx.StaticText(panel, label="Use a token with repository read/write and release permissions.")
+        sizer.Add(note, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM, 12)
+
+        buttons = self.CreateSeparatedButtonSizer(wx.OK | wx.CANCEL)
+        sizer.Add(buttons, 0, wx.EXPAND | wx.ALL, 10)
+        panel.SetSizer(sizer)
+        self.Centre()
+
+    def get_values(self):
+        return (
+            normalize_api_url(self.api_url.GetValue()),
+            (self.web_url.GetValue() or derive_web_url(self.api_url.GetValue())).strip().rstrip("/"),
+            self.token.GetValue().strip(),
+        )
+
     def on_success(self):
         """Called when authorization succeeds."""
         self.EndModal(wx.ID_OK)
@@ -139,6 +204,9 @@ class GitHubAccount:
 
         # Load or get access token
         self.prefs.access_token = self.prefs.get("access_token", "")
+        self.prefs.api_base_url = normalize_api_url(self.prefs.get("api_base_url", GITHUB_API_URL))
+        self.prefs.web_base_url = (self.prefs.get("web_base_url", derive_web_url(self.prefs.api_base_url)) or "").rstrip("/")
+        self.prefs.service_name = self.prefs.get("service_name", "GitHub" if self.is_github else self.prefs.web_base_url)
 
         if not self.prefs.access_token:
             self._authenticate()
@@ -155,8 +223,40 @@ class GitHubAccount:
 
         self.ready = True
 
+    @property
+    def is_github(self) -> bool:
+        return normalize_api_url(self.prefs.get("api_base_url", GITHUB_API_URL)) == GITHUB_API_URL
+
+    @property
+    def api_base_url(self) -> str:
+        return normalize_api_url(self.prefs.get("api_base_url", GITHUB_API_URL))
+
+    @property
+    def web_base_url(self) -> str:
+        return (self.prefs.get("web_base_url", derive_web_url(self.api_base_url)) or "").rstrip("/")
+
+    def _api(self, path: str) -> str:
+        return f"{self.api_base_url}{path}"
+
     def _authenticate(self):
         """Perform OAuth Device Flow authentication."""
+        if not self.is_github:
+            dlg = _TokenAuthDialog(None, self.prefs.get("api_base_url", ""), self.prefs.get("web_base_url", ""))
+            result = dlg.ShowModal()
+            if result != wx.ID_OK:
+                dlg.Destroy()
+                _exit_app()
+            api_url, web_url, token = dlg.get_values()
+            dlg.Destroy()
+            if not token:
+                wx.MessageBox("An access token is required for self-hosted Git services.", "Authentication Error", wx.OK | wx.ICON_ERROR)
+                _exit_app()
+            self.prefs.api_base_url = api_url
+            self.prefs.web_base_url = web_url
+            self.prefs.service_name = web_url
+            self.prefs.access_token = token
+            return
+
         if GITHUB_CLIENT_ID == "YOUR_CLIENT_ID_HERE":
             wx.MessageBox(
                 "GitHub OAuth App not configured!\n\n"
@@ -172,7 +272,7 @@ class GitHubAccount:
             "https://github.com/login/device/code",
             data={
                 "client_id": GITHUB_CLIENT_ID,
-                "scope": "repo user notifications"
+                "scope": "repo user notifications workflow delete_repo"
             },
             headers={"Accept": "application/json"}
         )
@@ -277,14 +377,14 @@ class GitHubAccount:
 
     def _verify_credentials(self):
         """Verify credentials and get user info."""
-        response = self._session.get(f"{GITHUB_API_URL}/user")
+        response = self._session.get(self._api("/user"))
 
         if response.status_code == 401:
             # Token invalid, clear and re-authenticate
             self.prefs.access_token = ""
             self._authenticate()
             self._session.headers["Authorization"] = f"Bearer {self.prefs.access_token}"
-            response = self._session.get(f"{GITHUB_API_URL}/user")
+            response = self._session.get(self._api("/user"))
 
         if response.status_code != 200:
             wx.MessageBox(
@@ -303,7 +403,7 @@ class GitHubAccount:
 
         while True:
             response = self._session.get(
-                f"{GITHUB_API_URL}/user/repos",
+                self._api("/user/repos"),
                 params={
                     "sort": sort,
                     "direction": "desc",
@@ -337,7 +437,7 @@ class GitHubAccount:
 
         while True:
             response = self._session.get(
-                f"{GITHUB_API_URL}/user/starred",
+                self._api("/user/starred"),
                 params={
                     "per_page": per_page,
                     "page": page
@@ -371,7 +471,7 @@ class GitHubAccount:
 
         while True:
             response = self._session.get(
-                f"{GITHUB_API_URL}/user/subscriptions",
+                self._api("/user/subscriptions"),
                 params={
                     "per_page": per_page,
                     "page": page
@@ -401,12 +501,22 @@ class GitHubAccount:
     def get_repo(self, owner: str, repo: str) -> Repository | None:
         """Get a single repository by owner and name."""
         response = self._session.get(
-            f"{GITHUB_API_URL}/repos/{owner}/{repo}"
+            self._api(f"/repos/{owner}/{repo}")
         )
 
         if response.status_code != 200:
             return None
 
+        return Repository.from_github_api(response.json())
+
+    def update_repository(self, owner: str, repo: str, **fields) -> Repository | None:
+        """Update repository metadata/settings."""
+        self._set_last_error("")
+        payload = {k: v for k, v in fields.items() if v is not None}
+        response = self._session.patch(self._api(f"/repos/{owner}/{repo}"), json=payload)
+        if response.status_code != 200:
+            self._set_last_error(f"Repository update failed ({response.status_code}): {response.text[:300]}")
+            return None
         return Repository.from_github_api(response.json())
 
     @property
@@ -431,6 +541,9 @@ class GitHubAccount:
 
     def _graphql(self, query: str, variables: dict = None) -> dict | None:
         """Execute a GitHub GraphQL query/mutation."""
+        if not self.is_github:
+            self._set_last_error("GraphQL is only available for GitHub accounts.")
+            return None
         self._set_last_error("")
         try:
             response = self._session.post(
@@ -1509,7 +1622,7 @@ class GitHubAccount:
 
         while True:
             response = self._session.get(
-                f"{GITHUB_API_URL}/repos/{owner}/{repo}/releases",
+                self._api(f"/repos/{owner}/{repo}/releases"),
                 params={
                     "per_page": per_page,
                     "page": page
@@ -1536,7 +1649,7 @@ class GitHubAccount:
     def get_release(self, owner: str, repo: str, release_id: int) -> Release | None:
         """Get a single release by ID."""
         response = self._session.get(
-            f"{GITHUB_API_URL}/repos/{owner}/{repo}/releases/{release_id}"
+            self._api(f"/repos/{owner}/{repo}/releases/{release_id}")
         )
 
         if response.status_code != 200:
@@ -1547,7 +1660,7 @@ class GitHubAccount:
     def get_latest_release(self, owner: str, repo: str) -> Release | None:
         """Get the latest release for a repository."""
         response = self._session.get(
-            f"{GITHUB_API_URL}/repos/{owner}/{repo}/releases/latest"
+            self._api(f"/repos/{owner}/{repo}/releases/latest")
         )
 
         if response.status_code != 200:
@@ -1558,13 +1671,95 @@ class GitHubAccount:
     def get_release_by_tag(self, owner: str, repo: str, tag: str) -> Release | None:
         """Get a release by tag name."""
         response = self._session.get(
-            f"{GITHUB_API_URL}/repos/{owner}/{repo}/releases/tags/{tag}"
+            self._api(f"/repos/{owner}/{repo}/releases/tags/{tag}")
         )
 
         if response.status_code != 200:
             return None
 
         return Release.from_github_api(response.json())
+
+    def create_release(self, owner: str, repo: str, tag_name: str, name: str = "",
+                       body: str = "", draft: bool = False, prerelease: bool = False,
+                       target_commitish: str = "") -> Release | None:
+        """Create a release."""
+        self._set_last_error("")
+        payload = {
+            "tag_name": tag_name,
+            "name": name or tag_name,
+            "body": body or "",
+            "draft": draft,
+            "prerelease": prerelease,
+        }
+        if target_commitish:
+            payload["target_commitish"] = target_commitish
+        response = self._session.post(self._api(f"/repos/{owner}/{repo}/releases"), json=payload)
+        if response.status_code not in (200, 201):
+            self._set_last_error(f"Create release failed ({response.status_code}): {response.text[:300]}")
+            return None
+        return Release.from_github_api(response.json())
+
+    def update_release(self, owner: str, repo: str, release_id: int, **fields) -> Release | None:
+        """Update release metadata."""
+        self._set_last_error("")
+        payload = {k: v for k, v in fields.items() if v is not None}
+        response = self._session.patch(self._api(f"/repos/{owner}/{repo}/releases/{release_id}"), json=payload)
+        if response.status_code != 200:
+            self._set_last_error(f"Update release failed ({response.status_code}): {response.text[:300]}")
+            return None
+        return Release.from_github_api(response.json())
+
+    def delete_release(self, owner: str, repo: str, release_id: int) -> bool:
+        """Delete a release."""
+        self._set_last_error("")
+        response = self._session.delete(self._api(f"/repos/{owner}/{repo}/releases/{release_id}"))
+        if response.status_code != 204:
+            self._set_last_error(f"Delete release failed ({response.status_code}): {response.text[:300]}")
+            return False
+        return True
+
+    def upload_release_asset(self, owner: str, repo: str, release_id: int, file_path: str,
+                             label: str = "") -> ReleaseAsset | None:
+        """Upload one release asset."""
+        self._set_last_error("")
+        name = os.path.basename(file_path)
+        if self.is_github:
+            url = f"https://uploads.github.com/repos/{owner}/{repo}/releases/{release_id}/assets?{urlencode({'name': name})}"
+            if label:
+                url += "&" + urlencode({"label": label})
+            with open(file_path, "rb") as fh:
+                response = self._session.post(
+                    url,
+                    data=fh,
+                    headers={
+                        "Accept": "application/vnd.github+json",
+                        "Content-Type": "application/octet-stream",
+                        "X-GitHub-Api-Version": "2022-11-28",
+                    },
+                )
+        else:
+            params = {"name": name}
+            if label:
+                params["label"] = label
+            with open(file_path, "rb") as fh:
+                response = self._session.post(
+                    self._api(f"/repos/{owner}/{repo}/releases/{release_id}/assets"),
+                    params=params,
+                    files={"attachment": (name, fh)},
+                )
+        if response.status_code not in (200, 201):
+            self._set_last_error(f"Upload asset failed ({response.status_code}): {response.text[:300]}")
+            return None
+        return ReleaseAsset.from_github_api(response.json())
+
+    def delete_release_asset(self, owner: str, repo: str, asset_id: int) -> bool:
+        """Delete a release asset."""
+        self._set_last_error("")
+        response = self._session.delete(self._api(f"/repos/{owner}/{repo}/releases/assets/{asset_id}"))
+        if response.status_code != 204:
+            self._set_last_error(f"Delete asset failed ({response.status_code}): {response.text[:300]}")
+            return False
+        return True
 
     def download_asset(self, owner: str, repo: str, asset_id: int, dest_path: str,
                        progress_callback=None) -> bool:
@@ -1582,7 +1777,7 @@ class GitHubAccount:
         """
         # Get asset info first to get the download URL
         response = self._session.get(
-            f"{GITHUB_API_URL}/repos/{owner}/{repo}/releases/assets/{asset_id}",
+            self._api(f"/repos/{owner}/{repo}/releases/assets/{asset_id}"),
             headers={"Accept": "application/octet-stream"},
             stream=True,
             allow_redirects=True

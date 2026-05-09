@@ -44,9 +44,12 @@ main.create_window()
 # Apply theme
 theme.apply_theme(main.window)
 
-# Show window
-if fastgh_app.prefs.window_shown:
-    main.window.Show()
+# A user-initiated app launch should always present the main window. The
+# saved window_shown flag is only used for close/quit-to-tray behavior after
+# startup, not to suppress all windows on launch.
+fastgh_app.prefs.window_shown = True
+wx.CallAfter(main.window.Show)
+wx.CallAfter(main.window._focus_current_list)
 
 # Start main loop
 wx_app.MainLoop()

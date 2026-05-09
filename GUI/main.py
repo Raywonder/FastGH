@@ -2,13 +2,15 @@
 
 import wx
 import wx.adv
+import os
 import platform
+import sys
 import threading
 import webbrowser
 from application import get_app
 from models.repository import Repository
 from version import APP_NAME
-from .wx_safety import safe_raise
+from .wx_safety import safe_raise, safe_show_dialog
 
 # Global hotkey support (Windows only)
 if platform.system() != "Darwin":
@@ -23,6 +25,56 @@ else:
 # Global window reference
 window = None
 tray_icon = None
+
+UPSTREAM_FASTGH_URL = "https://github.com/masonasons/FastGH"
+
+
+class UserGuideDialog(wx.Dialog):
+    """Built-in FastGH documentation reader."""
+
+    def __init__(self, parent, text: str):
+        wx.Dialog.__init__(self, parent, title="FastGH User Guide", size=(760, 620))
+        panel = wx.Panel(self)
+        main = wx.BoxSizer(wx.VERTICAL)
+
+        label = wx.StaticText(panel, label="&Documentation:")
+        main.Add(label, 0, wx.LEFT | wx.TOP, 10)
+
+        self.doc_text = wx.TextCtrl(
+            panel,
+            value=text,
+            style=wx.TE_READONLY | wx.TE_MULTILINE,
+            size=(720, 520),
+        )
+        main.Add(self.doc_text, 1, wx.ALL | wx.EXPAND, 10)
+
+        copy_btn = wx.Button(panel, label="&Copy")
+        upstream_btn = wx.Button(panel, label="Open &Upstream")
+        close_btn = wx.Button(panel, wx.ID_CLOSE, label="Cl&ose")
+        buttons = wx.BoxSizer(wx.HORIZONTAL)
+        buttons.Add(copy_btn, 0, wx.RIGHT, 5)
+        buttons.Add(upstream_btn, 0, wx.RIGHT, 5)
+        buttons.Add(close_btn, 0)
+        main.Add(buttons, 0, wx.ALL | wx.ALIGN_CENTER, 10)
+
+        panel.SetSizer(main)
+        copy_btn.Bind(wx.EVT_BUTTON, self.on_copy)
+        upstream_btn.Bind(wx.EVT_BUTTON, self.on_open_upstream)
+        close_btn.Bind(wx.EVT_BUTTON, self.on_close)
+        self.Bind(wx.EVT_CLOSE, self.on_close)
+        self.doc_text.SetFocus()
+
+    def on_copy(self, event):
+        if wx.TheClipboard.Open():
+            wx.TheClipboard.SetData(wx.TextDataObject(self.doc_text.GetValue()))
+            wx.TheClipboard.Close()
+            wx.MessageBox("Documentation copied to clipboard.", "Copied", wx.OK | wx.ICON_INFORMATION)
+
+    def on_open_upstream(self, event):
+        webbrowser.open(UPSTREAM_FASTGH_URL)
+
+    def on_close(self, event):
+        self.EndModal(wx.ID_CLOSE)
 
 
 def create_tray_icon_image():
@@ -325,6 +377,13 @@ class MainGui(wx.Frame):
         help_menu = wx.Menu()
         m_check_updates = help_menu.Append(-1, "Check for &Updates...", "Check for application updates")
         self.Bind(wx.EVT_MENU, self.on_check_updates, m_check_updates)
+        m_open_latest = help_menu.Append(-1, "Open Latest FastGH &Download", "Open the newest FastGH release download")
+        self.Bind(wx.EVT_MENU, self.on_open_latest_fastgh_download, m_open_latest)
+        m_copy_latest = help_menu.Append(-1, "Copy Latest FastGH Download &Link", "Copy a shareable FastGH download link")
+        self.Bind(wx.EVT_MENU, self.on_copy_latest_fastgh_download, m_copy_latest)
+        help_menu.AppendSeparator()
+        m_user_guide = help_menu.Append(-1, "FastGH &User Guide", "Read built-in FastGH documentation")
+        self.Bind(wx.EVT_MENU, self.on_user_guide, m_user_guide)
         menu_bar.Append(help_menu, "&Help")
 
         self.SetMenuBar(menu_bar)
@@ -564,8 +623,9 @@ class MainGui(wx.Frame):
         self.status_bar.SetStatusText("Ready")
         from GUI.discussions import ViewDiscussionDialog
         dlg = ViewDiscussionDialog(self, owner, repo_name, discussion)
-        dlg.ShowModal()
-        dlg.Destroy()
+        result = safe_show_dialog(dlg)
+        if result is not None:
+            dlg.Destroy()
 
     def _open_feed_commits(self, owner: str, repo_name: str):
         """Open commits dialog from the feed."""
@@ -584,8 +644,9 @@ class MainGui(wx.Frame):
         self.status_bar.SetStatusText("Ready")
         from GUI.commits import CommitsDialog
         dlg = CommitsDialog(self._get_dialog_parent(), repo)
-        dlg.ShowModal()
-        dlg.Destroy()
+        result = safe_show_dialog(dlg)
+        if result is not None:
+            dlg.Destroy()
 
     def _open_feed_releases(self, owner: str, repo_name: str):
         """Open releases dialog from the feed."""
@@ -604,8 +665,9 @@ class MainGui(wx.Frame):
         self.status_bar.SetStatusText("Ready")
         from GUI.releases import ReleasesDialog
         dlg = ReleasesDialog(self._get_dialog_parent(), repo)
-        dlg.ShowModal()
-        dlg.Destroy()
+        result = safe_show_dialog(dlg)
+        if result is not None:
+            dlg.Destroy()
 
     def _open_feed_repo_direct(self, owner: str, repo_name: str):
         """Open repo dialog directly from feed."""
@@ -643,8 +705,9 @@ class MainGui(wx.Frame):
         self.status_bar.SetStatusText("Ready")
         from GUI.view import ViewRepoDialog
         dlg = ViewRepoDialog(self._get_dialog_parent(), repo)
-        dlg.ShowModal()
-        dlg.Destroy()
+        result = safe_show_dialog(dlg)
+        if result is not None:
+            dlg.Destroy()
 
     def on_view_feed_user(self, event):
         """View user profile from feed event."""
@@ -652,8 +715,9 @@ class MainGui(wx.Frame):
         if feed_event:
             from GUI.search import UserProfileDialog
             dlg = UserProfileDialog(self._get_dialog_parent(), feed_event.actor.login)
-            dlg.ShowModal()
-            dlg.Destroy()
+            result = safe_show_dialog(dlg)
+            if result is not None:
+                dlg.Destroy()
 
     def on_context_menu(self, event):
         """Show context menu for repository."""
@@ -1328,8 +1392,9 @@ class MainGui(wx.Frame):
         if user:
             from GUI.search import UserProfileDialog
             dlg = UserProfileDialog(self._get_dialog_parent(), user.login)
-            dlg.ShowModal()
-            dlg.Destroy()
+            result = safe_show_dialog(dlg)
+            if result is not None:
+                dlg.Destroy()
 
     def on_open_following_user(self, event):
         """Open following user in browser."""
@@ -1590,6 +1655,44 @@ class MainGui(wx.Frame):
         """Check for application updates."""
         threading.Thread(target=self.app.cfu, args=[False], daemon=True).start()
 
+    def on_open_latest_fastgh_download(self, event):
+        """Open the latest FastGH download across configured release channels."""
+        threading.Thread(target=self.app.open_latest_fastgh_download, daemon=True).start()
+
+    def on_copy_latest_fastgh_download(self, event):
+        """Copy the latest FastGH download link across configured release channels."""
+        threading.Thread(target=self.app.copy_latest_fastgh_download_link, daemon=True).start()
+
+    def on_user_guide(self, event):
+        """Open built-in user documentation."""
+        doc_path = self._find_user_guide()
+        if not doc_path:
+            wx.MessageBox("The built-in user guide could not be found.", "User Guide", wx.OK | wx.ICON_ERROR)
+            return
+        try:
+            with open(doc_path, "r", encoding="utf-8") as handle:
+                text = handle.read()
+        except OSError as e:
+            wx.MessageBox(f"Could not read the user guide:\n{e}", "User Guide", wx.OK | wx.ICON_ERROR)
+            return
+        dlg = UserGuideDialog(self._get_dialog_parent(), text)
+        dlg.ShowModal()
+        dlg.Destroy()
+
+    def _find_user_guide(self):
+        roots = []
+        if getattr(sys, "frozen", False):
+            roots.append(getattr(sys, "_MEIPASS", ""))
+            roots.append(os.path.dirname(sys.executable))
+        roots.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        for root in roots:
+            if not root:
+                continue
+            path = os.path.join(root, "docs", "user-guide.txt")
+            if os.path.exists(path):
+                return path
+        return None
+
     def on_refresh(self, event):
         """Refresh all data."""
         self.refresh_all()
@@ -1669,8 +1772,9 @@ class MainGui(wx.Frame):
         if repo:
             from GUI.view import ViewRepoDialog
             dlg = ViewRepoDialog(self._get_dialog_parent(), repo)
-            dlg.ShowModal()
-            dlg.Destroy()
+            result = safe_show_dialog(dlg)
+            if result is not None:
+                dlg.Destroy()
 
     def on_open_url(self, event):
         """Open selected repository in browser."""
@@ -1691,7 +1795,7 @@ class MainGui(wx.Frame):
         """Copy git clone URL to clipboard."""
         repo = self.get_selected_repo()
         if repo:
-            clone_url = f"https://github.com/{repo.full_name}.git"
+            clone_url = repo.clone_url or f"{self.app.currentAccount.web_base_url}/{repo.full_name}.git"
             if wx.TheClipboard.Open():
                 wx.TheClipboard.SetData(wx.TextDataObject(clone_url))
                 wx.TheClipboard.Close()
@@ -1707,8 +1811,9 @@ class MainGui(wx.Frame):
         if repo:
             from GUI.issues import IssuesDialog
             dlg = IssuesDialog(self._get_dialog_parent(), repo)
-            dlg.ShowModal()
-            dlg.Destroy()
+            result = safe_show_dialog(dlg)
+            if result is not None:
+                dlg.Destroy()
 
     def on_view_prs(self, event):
         """Open pull requests dialog."""
@@ -1716,8 +1821,9 @@ class MainGui(wx.Frame):
         if repo:
             from GUI.pullrequests import PullRequestsDialog
             dlg = PullRequestsDialog(self._get_dialog_parent(), repo)
-            dlg.ShowModal()
-            dlg.Destroy()
+            result = safe_show_dialog(dlg)
+            if result is not None:
+                dlg.Destroy()
 
     def on_view_commits(self, event):
         """Open commits dialog."""
@@ -1725,8 +1831,9 @@ class MainGui(wx.Frame):
         if repo:
             from GUI.commits import CommitsDialog
             dlg = CommitsDialog(self._get_dialog_parent(), repo)
-            dlg.ShowModal()
-            dlg.Destroy()
+            result = safe_show_dialog(dlg)
+            if result is not None:
+                dlg.Destroy()
 
     def on_view_actions(self, event):
         """Open GitHub Actions dialog."""
@@ -1734,8 +1841,9 @@ class MainGui(wx.Frame):
         if repo:
             from GUI.actions import ActionsDialog
             dlg = ActionsDialog(self._get_dialog_parent(), repo)
-            dlg.ShowModal()
-            dlg.Destroy()
+            result = safe_show_dialog(dlg)
+            if result is not None:
+                dlg.Destroy()
 
     def on_view_releases(self, event):
         """Open releases dialog."""
@@ -1743,8 +1851,9 @@ class MainGui(wx.Frame):
         if repo:
             from GUI.releases import ReleasesDialog
             dlg = ReleasesDialog(self._get_dialog_parent(), repo)
-            dlg.ShowModal()
-            dlg.Destroy()
+            result = safe_show_dialog(dlg)
+            if result is not None:
+                dlg.Destroy()
 
     def on_view_owner(self, event):
         """View the repository owner's profile."""
@@ -1752,8 +1861,9 @@ class MainGui(wx.Frame):
         if repo:
             from GUI.search import UserProfileDialog
             dlg = UserProfileDialog(self._get_dialog_parent(), repo.owner)
-            dlg.ShowModal()
-            dlg.Destroy()
+            result = safe_show_dialog(dlg)
+            if result is not None:
+                dlg.Destroy()
 
     def on_close(self, event):
         """Handle window close - hide to tray/status item when available."""
@@ -1780,6 +1890,8 @@ class MainGui(wx.Frame):
         else:
             self.app.prefs.window_shown = True
             self.Show()
+            if not any((self.feed, self.repos, self.starred, self.watched, self.following, self.notifications)):
+                self.refresh_all()
             safe_raise(self)
             self._focus_current_list()
 

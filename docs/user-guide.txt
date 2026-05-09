@@ -1,0 +1,125 @@
+FastGH User Guide
+=================
+
+FastGH is a desktop client for browsing GitHub and compatible self-hosted Git
+services. It can view activity, repositories, issues, pull requests, workflows,
+releases, and release assets from one accessible interface.
+
+Project links:
+
+- Upstream FastGH project: https://github.com/masonasons/FastGH
+- GitHub: https://github.com/
+- Gitea documentation: https://docs.gitea.com/
+- Ollama documentation: https://github.com/ollama/ollama
+
+Accounts
+--------
+
+Use File, Manage Accounts to add accounts.
+
+Add GitHub starts the normal GitHub sign-in flow.
+
+Add Self-hosted connects to Gitea, Forgejo, GitHub Enterprise, or another
+GitHub-compatible API. Enter the API URL, web URL, and a token with only the
+repository permissions you need. Tokens are stored in local FastGH preferences
+on this computer.
+
+Example values:
+
+- API URL: https://git.example.com/api/v1
+- Web URL: https://git.example.com
+- Repository URL: https://git.example.com/example-owner/example-repo
+
+Repository Browsing
+-------------------
+
+Repository lists can be opened from the main window. Use Actions, View
+Repository Info to inspect a selected repository.
+
+From the repository dialog you can:
+
+- Open the repository in a browser.
+- Copy the web URL or clone URL.
+- Clone, pull, or open the local repository.
+- View files, issues, pull requests, commits, workflows, releases, forks, and
+  owner details.
+- Configure scheduled auto sync for that repository.
+- Edit repository settings when your account has permission.
+- Generate an AI summary when AI summaries are configured.
+
+Release Management
+------------------
+
+Use Actions, View Releases from a selected repository. Releases can be viewed,
+created, edited, or deleted when your account has permission.
+
+From a release details window you can:
+
+- Download one asset or all assets.
+- Copy an asset URL.
+- Upload a release asset.
+- Delete a selected release asset.
+- Open the release in a browser.
+- Generate an AI summary of the release notes and assets.
+
+FastGH Updates
+--------------
+
+Use Help, Check for Updates to check the configured update channel.
+
+Use Help, Open Latest FastGH Download to open the newest available FastGH
+release asset from the configured release channels.
+
+Use Help, Copy Latest FastGH Download Link to copy a shareable download link for
+the newest available FastGH release.
+
+The default release channels include this Raywonder build repository and the
+original upstream FastGH repository by masonasons:
+https://github.com/masonasons/FastGH
+
+Additional channels can be saved in preferences by advanced users.
+
+AI Summaries
+------------
+
+Use File, Options, AI Summaries to choose a provider.
+
+Supported provider modes:
+
+- Disabled: no AI summary requests are sent.
+- Ollama: sends summaries to an Ollama host such as http://127.0.0.1:11434.
+- OpenClaw gateway: sends summaries through an OpenClaw gateway, for example
+  http://localhost:18790/api/chat or your own trusted gateway URL.
+- AI Router, Copilot-compatible, or other OpenAI-compatible API: sends summaries
+  to a chat-completions endpoint using the token you configure locally.
+
+Summary requests include only the repository or release text shown in FastGH.
+Do not summarize private content through a provider unless that provider is
+trusted for that repository.
+
+Repository summaries may include repository name, description, language, stars,
+forks, open issue count, visibility, default branch, archive status, and web URL.
+Release summaries may include repository name, release name, tag, status, release
+notes, asset names, asset sizes, and download counts. FastGH trims long summary
+input before sending it. Do not use private repositories, private release notes,
+or internal asset names with a provider you do not trust.
+
+Repository Sync
+---------------
+
+Use File, Options, Repository Sync to enable scheduled auto sync. Individual
+repositories can be configured from the repository details window.
+
+Git LFS support can be enabled in Options. When enabled, FastGH runs Git LFS
+steps after clone, pull, and scheduled sync when Git LFS is installed.
+
+Keyboard Notes
+--------------
+
+Menus and controls use standard desktop keyboard navigation. Use Alt on Windows
+or the macOS menu bar to reach menu commands. Use Tab and Shift+Tab to move
+between controls, arrow keys to move through lists, and Enter to open or activate
+the selected item in repository and release lists. In Manage Accounts, Delete
+removes the selected account after confirmation. Escape closes most dialogs; when
+it does not, use the Close or Cancel button. Buttons, lists, and text fields use
+native platform controls so screen readers can announce names, roles, and state.

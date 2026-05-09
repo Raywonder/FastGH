@@ -22,6 +22,11 @@ class Repository:
     url: str
     html_url: str
     private: bool
+    clone_url: str = ""
+    ssh_url: str = ""
+    archived: bool = False
+    default_branch: str = ""
+    has_issues: bool = True
 
     @classmethod
     def from_github_api(cls, data: dict) -> 'Repository':
@@ -55,6 +60,11 @@ class Repository:
             url=data['url'],
             html_url=data['html_url'],
             private=data.get('private', False),
+            clone_url=data.get('clone_url', ''),
+            ssh_url=data.get('ssh_url', ''),
+            archived=data.get('archived', False),
+            default_branch=data.get('default_branch', ''),
+            has_issues=data.get('has_issues', True),
         )
 
     def format_display(self) -> str:

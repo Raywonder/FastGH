@@ -80,6 +80,7 @@ class Release:
     html_url: str
     tarball_url: str
     zipball_url: str
+    upload_url: str
     author_login: str
     assets: list[ReleaseAsset]
 
@@ -118,6 +119,7 @@ class Release:
             html_url=data.get('html_url', ''),
             tarball_url=data.get('tarball_url', ''),
             zipball_url=data.get('zipball_url', ''),
+            upload_url=data.get('upload_url', ''),
             author_login=author.get('login', ''),
             assets=assets
         )

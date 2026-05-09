@@ -24,7 +24,7 @@ class OptionsDialog(wx.Dialog):
         self.app = get_app()
         self.parent_window = parent
 
-        wx.Dialog.__init__(self, parent, title="Options", size=(560, 860))
+        wx.Dialog.__init__(self, parent, title="Options", size=(620, 860))
 
         self.init_ui()
         self.bind_events()
@@ -33,7 +33,8 @@ class OptionsDialog(wx.Dialog):
 
     def init_ui(self):
         """Initialize the UI."""
-        self.panel = wx.Panel(self)
+        self.panel = wx.ScrolledWindow(self)
+        self.panel.SetScrollRate(0, 20)
         main_sizer = wx.BoxSizer(wx.VERTICAL)
 
         # Commits section
@@ -177,6 +178,86 @@ class OptionsDialog(wx.Dialog):
         sync_sizer.Add(tools_row, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.EXPAND, 10)
 
         main_sizer.Add(sync_sizer, 0, wx.EXPAND | wx.LEFT | wx.RIGHT | wx.BOTTOM, 10)
+
+        # AI summaries section
+        ai_box = wx.StaticBox(self.panel, label="AI Summaries")
+        ai_sizer = wx.StaticBoxSizer(ai_box, wx.VERTICAL)
+
+        provider_row = wx.BoxSizer(wx.HORIZONTAL)
+        provider_label = wx.StaticText(self.panel, label="Summary &provider:")
+        provider_row.Add(provider_label, 0, wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 10)
+        self.ai_provider_choice = wx.Choice(
+            self.panel,
+            choices=["Disabled", "Ollama", "OpenClaw gateway", "AI Router or Copilot-compatible API"]
+        )
+        self.ai_provider_choice.SetToolTip("Provider used by repository and release summary buttons")
+        provider_row.Add(self.ai_provider_choice, 0)
+        ai_sizer.Add(provider_row, 0, wx.ALL, 10)
+
+        ollama_host_row = wx.BoxSizer(wx.HORIZONTAL)
+        ollama_host_label = wx.StaticText(self.panel, label="Ollama &host:")
+        ollama_host_row.Add(ollama_host_label, 0, wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 10)
+        self.ai_ollama_host = wx.TextCtrl(self.panel, size=(360, -1))
+        self.ai_ollama_host.SetToolTip("Example: http://127.0.0.1:11434 or http://100.64.0.2:11434")
+        ollama_host_row.Add(self.ai_ollama_host, 1)
+        ai_sizer.Add(ollama_host_row, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.EXPAND, 10)
+
+        ollama_model_row = wx.BoxSizer(wx.HORIZONTAL)
+        ollama_model_label = wx.StaticText(self.panel, label="Ollama &model:")
+        ollama_model_row.Add(ollama_model_label, 0, wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 10)
+        self.ai_ollama_model = wx.TextCtrl(self.panel, size=(220, -1))
+        self.ai_ollama_model.SetToolTip("Example: qwen2.5:14b")
+        ollama_model_row.Add(self.ai_ollama_model, 0)
+        ai_sizer.Add(ollama_model_row, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM, 10)
+
+        openclaw_url_row = wx.BoxSizer(wx.HORIZONTAL)
+        openclaw_url_label = wx.StaticText(self.panel, label="OpenClaw &URL:")
+        openclaw_url_row.Add(openclaw_url_label, 0, wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 10)
+        self.ai_openclaw_url = wx.TextCtrl(self.panel, size=(340, -1))
+        self.ai_openclaw_url.SetToolTip("Example: http://100.64.0.2:18790/api/chat")
+        openclaw_url_row.Add(self.ai_openclaw_url, 1)
+        ai_sizer.Add(openclaw_url_row, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.EXPAND, 10)
+
+        openclaw_model_row = wx.BoxSizer(wx.HORIZONTAL)
+        openclaw_model_label = wx.StaticText(self.panel, label="OpenClaw mo&del:")
+        openclaw_model_row.Add(openclaw_model_label, 0, wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 10)
+        self.ai_openclaw_model = wx.TextCtrl(self.panel, size=(220, -1))
+        self.ai_openclaw_model.SetToolTip("Model routed through OpenClaw")
+        openclaw_model_row.Add(self.ai_openclaw_model, 0)
+        ai_sizer.Add(openclaw_model_row, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM, 10)
+
+        openclaw_token_row = wx.BoxSizer(wx.HORIZONTAL)
+        openclaw_token_label = wx.StaticText(self.panel, label="OpenClaw to&ken:")
+        openclaw_token_row.Add(openclaw_token_label, 0, wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 10)
+        self.ai_openclaw_token = wx.TextCtrl(self.panel, size=(340, -1), style=wx.TE_PASSWORD)
+        self.ai_openclaw_token.SetToolTip("Optional token for authenticated OpenClaw gateways")
+        openclaw_token_row.Add(self.ai_openclaw_token, 1)
+        ai_sizer.Add(openclaw_token_row, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.EXPAND, 10)
+
+        compatible_url_row = wx.BoxSizer(wx.HORIZONTAL)
+        compatible_url_label = wx.StaticText(self.panel, label="Compatible &API URL:")
+        compatible_url_row.Add(compatible_url_label, 0, wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 10)
+        self.ai_compatible_url = wx.TextCtrl(self.panel, size=(340, -1))
+        self.ai_compatible_url.SetToolTip("OpenAI-compatible chat completions URL")
+        compatible_url_row.Add(self.ai_compatible_url, 1)
+        ai_sizer.Add(compatible_url_row, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.EXPAND, 10)
+
+        compatible_model_row = wx.BoxSizer(wx.HORIZONTAL)
+        compatible_model_label = wx.StaticText(self.panel, label="Compatible m&odel:")
+        compatible_model_row.Add(compatible_model_label, 0, wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 10)
+        self.ai_compatible_model = wx.TextCtrl(self.panel, size=(220, -1))
+        compatible_model_row.Add(self.ai_compatible_model, 0)
+        ai_sizer.Add(compatible_model_row, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM, 10)
+
+        compatible_token_row = wx.BoxSizer(wx.HORIZONTAL)
+        compatible_token_label = wx.StaticText(self.panel, label="Compatible &token:")
+        compatible_token_row.Add(compatible_token_label, 0, wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 10)
+        self.ai_compatible_token = wx.TextCtrl(self.panel, size=(340, -1), style=wx.TE_PASSWORD)
+        self.ai_compatible_token.SetToolTip("Stored locally in FastGH preferences and never shown in summaries")
+        compatible_token_row.Add(self.ai_compatible_token, 1)
+        ai_sizer.Add(compatible_token_row, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.EXPAND, 10)
+
+        main_sizer.Add(ai_sizer, 0, wx.EXPAND | wx.LEFT | wx.RIGHT | wx.BOTTOM, 10)
 
         # Notifications section
         notif_box = wx.StaticBox(self.panel, label="Desktop Notifications")
@@ -359,6 +440,24 @@ class OptionsDialog(wx.Dialog):
         self.repo_sync_use_tools_cb.SetValue(self.app.prefs.repo_sync_use_github_tools)
         self.repo_sync_tools_path.SetValue(self.app.prefs.repo_sync_github_tools_path)
 
+        provider = getattr(self.app.prefs, "ai_summary_provider", "disabled")
+        if provider == "ollama":
+            self.ai_provider_choice.SetSelection(1)
+        elif provider == "openclaw":
+            self.ai_provider_choice.SetSelection(2)
+        elif provider in ("copilot", "compatible", "openai", "ai_router"):
+            self.ai_provider_choice.SetSelection(3)
+        else:
+            self.ai_provider_choice.SetSelection(0)
+        self.ai_ollama_host.SetValue(getattr(self.app.prefs, "ai_ollama_host", "http://100.64.0.2:11434"))
+        self.ai_ollama_model.SetValue(getattr(self.app.prefs, "ai_ollama_model", "qwen2.5:14b"))
+        self.ai_openclaw_url.SetValue(getattr(self.app.prefs, "ai_openclaw_url", "http://100.64.0.2:18790/api/chat"))
+        self.ai_openclaw_model.SetValue(getattr(self.app.prefs, "ai_openclaw_model", "qwen2.5:14b"))
+        self.ai_openclaw_token.SetValue(getattr(self.app.prefs, "ai_openclaw_token", ""))
+        self.ai_compatible_url.SetValue(getattr(self.app.prefs, "ai_compatible_url", ""))
+        self.ai_compatible_model.SetValue(getattr(self.app.prefs, "ai_compatible_model", ""))
+        self.ai_compatible_token.SetValue(getattr(self.app.prefs, "ai_compatible_token", ""))
+
         # Notification settings
         self.notify_activity_cb.SetValue(self.app.prefs.notify_activity)
         self.notify_notifications_cb.SetValue(self.app.prefs.notify_notifications)
@@ -411,6 +510,23 @@ class OptionsDialog(wx.Dialog):
         self.app.prefs.notify_starred = self.notify_starred_cb.GetValue()
         self.app.prefs.notify_watched = self.notify_watched_cb.GetValue()
         self.app.prefs.repo_sync_notify = self.notify_repo_sync_cb.GetValue()
+        provider_idx = self.ai_provider_choice.GetSelection()
+        if provider_idx == 1:
+            self.app.prefs.ai_summary_provider = "ollama"
+        elif provider_idx == 2:
+            self.app.prefs.ai_summary_provider = "openclaw"
+        elif provider_idx == 3:
+            self.app.prefs.ai_summary_provider = "compatible"
+        else:
+            self.app.prefs.ai_summary_provider = "disabled"
+        self.app.prefs.ai_ollama_host = self.ai_ollama_host.GetValue().strip()
+        self.app.prefs.ai_ollama_model = self.ai_ollama_model.GetValue().strip()
+        self.app.prefs.ai_openclaw_url = self.ai_openclaw_url.GetValue().strip()
+        self.app.prefs.ai_openclaw_model = self.ai_openclaw_model.GetValue().strip()
+        self.app.prefs.ai_openclaw_token = self.ai_openclaw_token.GetValue().strip()
+        self.app.prefs.ai_compatible_url = self.ai_compatible_url.GetValue().strip()
+        self.app.prefs.ai_compatible_model = self.ai_compatible_model.GetValue().strip()
+        self.app.prefs.ai_compatible_token = self.ai_compatible_token.GetValue().strip()
         delivery_idx = self.notification_delivery_choice.GetSelection()
         if delivery_idx == 1:
             self.app.prefs.notification_delivery = "alert"

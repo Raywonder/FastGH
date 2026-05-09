@@ -91,7 +91,9 @@ def get_hidden_imports():
         "GUI.releases",
         "GUI.search",
         "GUI.theme",
+        "GUI.ai_summary_dialog",
         # Other modules
+        "ai_summary",
         "config",
         "application",
         "github_api",
@@ -120,6 +122,9 @@ def get_data_files(script_dir: Path):
     build_info = script_dir / "build_info.txt"
     if build_info.exists():
         datas.append((str(build_info), "."))
+    docs_dir = script_dir / "docs"
+    if docs_dir.exists():
+        datas.append((str(docs_dir), "docs"))
     return datas
 
 

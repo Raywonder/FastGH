@@ -31,9 +31,13 @@ class AccountsDialog(wx.Dialog):
         self.switch_btn.Bind(wx.EVT_BUTTON, self.on_switch)
         btn_sizer.Add(self.switch_btn, 0, wx.RIGHT, 5)
 
-        self.add_btn = wx.Button(panel, label="Add Account")
+        self.add_btn = wx.Button(panel, label="Add GitHub")
         self.add_btn.Bind(wx.EVT_BUTTON, self.on_add)
         btn_sizer.Add(self.add_btn, 0, wx.RIGHT, 5)
+
+        self.add_self_hosted_btn = wx.Button(panel, label="Add Self-hosted")
+        self.add_self_hosted_btn.Bind(wx.EVT_BUTTON, self.on_add_self_hosted)
+        btn_sizer.Add(self.add_self_hosted_btn, 0, wx.RIGHT, 5)
 
         self.remove_btn = wx.Button(panel, label="Remove")
         self.remove_btn.Bind(wx.EVT_BUTTON, self.on_remove)
@@ -57,6 +61,9 @@ class AccountsDialog(wx.Dialog):
 
         for i, account in enumerate(self.app.accounts):
             label = account.display_name or account.username
+            service = account.prefs.get("service_name", "GitHub")
+            if service and service != "GitHub":
+                label += f" - {service}"
             if account == self.app.currentAccount:
                 label += " (current)"
             self.account_list.Append(label)
@@ -97,6 +104,45 @@ class AccountsDialog(wx.Dialog):
         except Exception as e:
             wx.MessageBox(f"Failed to add account: {e}", "Error", wx.OK | wx.ICON_ERROR)
             self.app.prefs.accounts -= 1
+
+    def on_add_self_hosted(self, event):
+        """Add a self-hosted GitHub-compatible account."""
+        try:
+            import config
+            from github_api import _TokenAuthDialog
+
+            dlg = _TokenAuthDialog(self)
+            result = dlg.ShowModal()
+            if result != wx.ID_OK:
+                dlg.Destroy()
+                return
+            api_url, web_url, token = dlg.get_values()
+            dlg.Destroy()
+            if not token:
+                wx.MessageBox("Access token is required.", "Missing Token", wx.OK | wx.ICON_WARNING)
+                return
+
+            new_index = len(self.app.accounts)
+            prefs_name = "account" + str(new_index) if config.is_portable_mode() else "FastGH/account" + str(new_index)
+            prefs = config.Config(name=prefs_name, autosave=True)
+            prefs.api_base_url = api_url
+            prefs.web_base_url = web_url
+            prefs.service_name = web_url
+            prefs.access_token = token
+
+            self.app.prefs.accounts += 1
+            self.app.add_session(new_index)
+            self.load_accounts()
+
+            from GUI import main
+            if hasattr(main, 'window') and main.window:
+                main.window.refresh_all()
+        except Exception as e:
+            wx.MessageBox(f"Failed to add self-hosted account: {e}", "Error", wx.OK | wx.ICON_ERROR)
+            try:
+                self.app.prefs.accounts -= 1
+            except Exception:
+                pass
 
     def on_remove(self, event):
         """Remove selected account."""

@@ -24,7 +24,7 @@ DEFAULT_UPDATE_REPO = os.environ.get("FASTGH_UPDATE_REPO", "raywonder/FastGH")
 
 
 def _install_macos_wx_raise_guard():
-    """Disable wx Raise() on macOS to avoid Cocoa null-deref crashes."""
+    """Disable unsafe Cocoa wx window behaviors on macOS."""
     if platform.system() != "Darwin":
         return
     if getattr(wx, "_fastgh_raise_guard_installed", False):
@@ -45,6 +45,13 @@ def _install_macos_wx_raise_guard():
                 setattr(cls, "Raise", _safe_raise)
             except Exception:
                 pass
+
+    dialog_cls = getattr(wx, "Dialog", None)
+    if dialog_cls is not None and hasattr(dialog_cls, "OSXSetWorksWhenModal"):
+        try:
+            setattr(dialog_cls, "OSXSetWorksWhenModal", lambda self, *args, **kwargs: None)
+        except Exception:
+            pass
 
     wx._fastgh_raise_guard_installed = True
 
@@ -157,6 +164,24 @@ class Application:
             "update_channel",
             f"https://api.github.com/repos/{DEFAULT_UPDATE_REPO}/releases"
         )
+        self.prefs.update_channels = self.prefs.get(
+            "update_channels",
+            [
+                f"https://api.github.com/repos/{DEFAULT_UPDATE_REPO}/releases",
+                "https://api.github.com/repos/masonasons/FastGH/releases",
+            ]
+        )
+
+        # AI summary settings
+        self.prefs.ai_summary_provider = self.prefs.get("ai_summary_provider", "disabled")
+        self.prefs.ai_ollama_host = self.prefs.get("ai_ollama_host", "http://100.64.0.2:11434")
+        self.prefs.ai_ollama_model = self.prefs.get("ai_ollama_model", "qwen2.5:14b")
+        self.prefs.ai_openclaw_url = self.prefs.get("ai_openclaw_url", "http://100.64.0.2:18790/api/chat")
+        self.prefs.ai_openclaw_model = self.prefs.get("ai_openclaw_model", "qwen2.5:14b")
+        self.prefs.ai_openclaw_token = self.prefs.get("ai_openclaw_token", "")
+        self.prefs.ai_compatible_url = self.prefs.get("ai_compatible_url", "")
+        self.prefs.ai_compatible_model = self.prefs.get("ai_compatible_model", "")
+        self.prefs.ai_compatible_token = self.prefs.get("ai_compatible_token", "")
 
         # Load accounts
         if self.prefs.accounts > 0:
@@ -366,6 +391,110 @@ class Application:
             if isinstance(payload.get("latest"), dict):
                 return [payload["latest"]], channel_url
         raise ValueError(f"Unsupported update channel payload: {channel_url}")
+
+    def _normalize_update_channel(self, channel: str) -> str:
+        channel = str(channel or "").strip()
+        if not channel:
+            return ""
+        if "://" in channel:
+            return channel
+        if "/" in channel:
+            return f"https://api.github.com/repos/{channel}/releases"
+        return channel
+
+    def _load_releases_from_url(self, channel_url: str):
+        payload = requests.get(
+            channel_url,
+            headers={"accept": "application/vnd.github.v3+json"},
+            timeout=20
+        ).json()
+        if isinstance(payload, list):
+            return payload
+        if isinstance(payload, dict):
+            if isinstance(payload.get("releases"), list):
+                return payload["releases"]
+            if isinstance(payload.get("latest"), dict):
+                return [payload["latest"]]
+        return []
+
+    def _candidate_update_channels(self):
+        channels = []
+        configured = self.prefs.get("update_channels", []) if self.prefs else []
+        if isinstance(configured, str):
+            configured = [line.strip() for line in configured.splitlines()]
+        for channel in configured:
+            url = self._normalize_update_channel(channel)
+            if url and url not in channels:
+                channels.append(url)
+        current = self._resolve_update_channel_url()
+        if current and current not in channels:
+            channels.insert(0, current)
+        return channels
+
+    def _asset_for_platform(self, release: dict):
+        assets = release.get("assets") or []
+        preferred = []
+        for asset in assets:
+            name = (asset.get("name") or "").lower()
+            if platform.system() == "Windows" and ("windows" in name or name.endswith(".exe")):
+                preferred.append(asset)
+            elif platform.system() == "Darwin" and (name.endswith(".dmg") or "mac" in name or "darwin" in name):
+                preferred.append(asset)
+            elif platform.system() not in ("Windows", "Darwin") and ("linux" in name or name.endswith((".tar.gz", ".appimage"))):
+                preferred.append(asset)
+        if preferred:
+            return preferred[0]
+        return assets[0] if assets else None
+
+    def find_latest_fastgh_download(self):
+        """Find the newest FastGH release asset across configured channels."""
+        candidates = []
+        for channel in self._candidate_update_channels():
+            try:
+                for release in self._load_releases_from_url(channel):
+                    asset = self._asset_for_platform(release)
+                    if not asset:
+                        continue
+                    candidates.append({
+                        "channel": channel,
+                        "release": release,
+                        "asset": asset,
+                        "published_at": release.get("published_at") or release.get("created_at") or "",
+                    })
+            except Exception:
+                continue
+        candidates.sort(key=lambda item: item["published_at"], reverse=True)
+        return candidates[0] if candidates else None
+
+    def copy_latest_fastgh_download_link(self):
+        """Copy a shareable latest FastGH download link to the clipboard."""
+        latest = self.find_latest_fastgh_download()
+        if not latest:
+            self.alert_from_thread("No FastGH release download was found.", "FastGH Download")
+            return
+        url = latest["asset"].get("browser_download_url") or latest["release"].get("html_url")
+        if not url:
+            self.alert_from_thread("The latest FastGH release does not include a shareable URL.", "FastGH Download")
+            return
+
+        def copy_it():
+            if wx.TheClipboard.Open():
+                wx.TheClipboard.SetData(wx.TextDataObject(url))
+                wx.TheClipboard.Close()
+                release = latest["release"].get("tag_name", "latest")
+                self.alert(f"Copied {release} download link:\n\n{url}", "FastGH Download Link")
+
+        wx.CallAfter(copy_it)
+
+    def open_latest_fastgh_download(self):
+        """Open the latest FastGH download URL in the browser."""
+        latest = self.find_latest_fastgh_download()
+        if not latest:
+            self.alert_from_thread("No FastGH release download was found.", "FastGH Download")
+            return
+        url = latest["asset"].get("browser_download_url") or latest["release"].get("html_url")
+        if url:
+            wx.CallAfter(webbrowser.open, url)
 
     def cfu(self, silent=True):
         """Check for updates."""

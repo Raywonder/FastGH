@@ -70,6 +70,15 @@ class ReleasesDialog(wx.Dialog):
         self.download_tar_btn = wx.Button(self.panel, label="Download &Tarball")
         btn_sizer.Add(self.download_tar_btn, 0, wx.RIGHT, 5)
 
+        self.new_btn = wx.Button(self.panel, label="&New Release")
+        btn_sizer.Add(self.new_btn, 0, wx.RIGHT, 5)
+
+        self.edit_btn = wx.Button(self.panel, label="&Edit")
+        btn_sizer.Add(self.edit_btn, 0, wx.RIGHT, 5)
+
+        self.delete_btn = wx.Button(self.panel, label="De&lete")
+        btn_sizer.Add(self.delete_btn, 0, wx.RIGHT, 5)
+
         self.close_btn = wx.Button(self.panel, wx.ID_CLOSE, label="Cl&ose")
         btn_sizer.Add(self.close_btn, 0)
 
@@ -85,6 +94,9 @@ class ReleasesDialog(wx.Dialog):
         self.open_browser_btn.Bind(wx.EVT_BUTTON, self.on_open_browser)
         self.download_zip_btn.Bind(wx.EVT_BUTTON, self.on_download_zip)
         self.download_tar_btn.Bind(wx.EVT_BUTTON, self.on_download_tar)
+        self.new_btn.Bind(wx.EVT_BUTTON, self.on_new_release)
+        self.edit_btn.Bind(wx.EVT_BUTTON, self.on_edit_release)
+        self.delete_btn.Bind(wx.EVT_BUTTON, self.on_delete_release)
         self.close_btn.Bind(wx.EVT_BUTTON, self.on_close)
         self.releases_list.Bind(wx.EVT_LISTBOX_DCLICK, self.on_view)
         self.releases_list.Bind(wx.EVT_LISTBOX, self.on_selection_change)
@@ -132,6 +144,8 @@ class ReleasesDialog(wx.Dialog):
         self.open_browser_btn.Enable(has_selection)
         self.download_zip_btn.Enable(has_selection)
         self.download_tar_btn.Enable(has_selection)
+        self.edit_btn.Enable(has_selection)
+        self.delete_btn.Enable(has_selection)
 
     def get_selected_release(self) -> Release | None:
         """Get the currently selected release."""
@@ -165,6 +179,48 @@ class ReleasesDialog(wx.Dialog):
         release = self.get_selected_release()
         if release and release.tarball_url:
             webbrowser.open(release.tarball_url)
+
+    def on_new_release(self, event):
+        dlg = ReleaseEditDialog(self, self.repo)
+        result = dlg.ShowModal()
+        dlg.Destroy()
+        if result == wx.ID_OK:
+            self.load_releases()
+
+    def on_edit_release(self, event):
+        release = self.get_selected_release()
+        if not release:
+            return
+        dlg = ReleaseEditDialog(self, self.repo, release)
+        result = dlg.ShowModal()
+        dlg.Destroy()
+        if result == wx.ID_OK:
+            self.load_releases()
+
+    def on_delete_release(self, event):
+        release = self.get_selected_release()
+        if not release:
+            return
+        result = wx.MessageBox(
+            f"Delete release {release.tag_name}?",
+            "Delete Release",
+            wx.YES_NO | wx.ICON_WARNING
+        )
+        if result != wx.YES:
+            return
+
+        def do_delete():
+            ok = self.account.delete_release(self.owner, self.repo_name, release.id)
+            wx.CallAfter(done, ok)
+
+        def done(ok):
+            if ok:
+                wx.MessageBox("Release deleted.", "Delete Release", wx.OK | wx.ICON_INFORMATION)
+                self.load_releases()
+            else:
+                wx.MessageBox(self.account.get_last_error() or "Delete failed.", "Delete Release", wx.OK | wx.ICON_ERROR)
+
+        threading.Thread(target=do_delete, daemon=True).start()
 
     def on_selection_change(self, event):
         """Handle selection change - show release details."""
@@ -281,6 +337,15 @@ class ViewReleaseDialog(wx.Dialog):
         self.copy_url_btn = wx.Button(self.panel, label="Copy &URL")
         btn_sizer.Add(self.copy_url_btn, 0, wx.RIGHT, 5)
 
+        self.upload_asset_btn = wx.Button(self.panel, label="&Upload Asset")
+        btn_sizer.Add(self.upload_asset_btn, 0, wx.RIGHT, 5)
+
+        self.delete_asset_btn = wx.Button(self.panel, label="Delete A&sset")
+        btn_sizer.Add(self.delete_asset_btn, 0, wx.RIGHT, 5)
+
+        self.summary_btn = wx.Button(self.panel, label="AI Su&mmary")
+        btn_sizer.Add(self.summary_btn, 0, wx.RIGHT, 5)
+
         self.open_browser_btn = wx.Button(self.panel, label="Open in &Browser")
         btn_sizer.Add(self.open_browser_btn, 0, wx.RIGHT, 5)
 
@@ -327,6 +392,7 @@ class ViewReleaseDialog(wx.Dialog):
         self.download_btn.Enable(has_selection)
         self.copy_url_btn.Enable(has_selection)
         self.download_all_btn.Enable(has_assets)
+        self.delete_asset_btn.Enable(has_selection)
 
     def get_selected_asset(self) -> ReleaseAsset | None:
         """Get the currently selected asset."""
@@ -342,6 +408,9 @@ class ViewReleaseDialog(wx.Dialog):
         self.download_btn.Bind(wx.EVT_BUTTON, self.on_download)
         self.download_all_btn.Bind(wx.EVT_BUTTON, self.on_download_all)
         self.copy_url_btn.Bind(wx.EVT_BUTTON, self.on_copy_url)
+        self.upload_asset_btn.Bind(wx.EVT_BUTTON, self.on_upload_asset)
+        self.delete_asset_btn.Bind(wx.EVT_BUTTON, self.on_delete_asset)
+        self.summary_btn.Bind(wx.EVT_BUTTON, self.on_ai_summary)
         self.open_browser_btn.Bind(wx.EVT_BUTTON, self.on_open_browser)
         self.close_btn.Bind(wx.EVT_BUTTON, self.on_close)
         self.assets_list.Bind(wx.EVT_LISTBOX, self.on_asset_selection)
@@ -516,6 +585,106 @@ class ViewReleaseDialog(wx.Dialog):
         """Open release in browser."""
         webbrowser.open(self.release.html_url)
 
+    def on_ai_summary(self, event):
+        """Summarize release notes and assets."""
+        title = f"{self.repo.full_name} release {self.release.tag_name}"
+        asset_lines = [
+            f"- {asset.name}: {asset.download_count} downloads, {asset.size} bytes"
+            for asset in self.release.assets
+        ]
+        content = "\n".join([
+            f"Repository: {self.repo.full_name}",
+            f"Release: {self.release.name or self.release.tag_name}",
+            f"Tag: {self.release.tag_name}",
+            f"Status: {self.release.get_status_label()}",
+            "",
+            "Release notes:",
+            self.release.body or "No release notes",
+            "",
+            "Assets:",
+            "\n".join(asset_lines) if asset_lines else "No assets",
+        ])
+        self._run_ai_summary(title, content)
+
+    def _run_ai_summary(self, title: str, content: str):
+        progress = wx.ProgressDialog(
+            "AI Summary",
+            "Generating summary...",
+            maximum=100,
+            parent=self,
+            style=wx.PD_APP_MODAL | wx.PD_AUTO_HIDE,
+        )
+
+        def do_summary():
+            try:
+                from ai_summary import summarize_text
+                summary = summarize_text(self.app.prefs, title, content)
+                wx.CallAfter(self._show_ai_summary, title, summary)
+            except Exception as e:
+                wx.CallAfter(wx.MessageBox, str(e), "AI Summary Error", wx.OK | wx.ICON_ERROR)
+            finally:
+                wx.CallAfter(progress.Destroy)
+
+        threading.Thread(target=do_summary, daemon=True).start()
+
+    def _show_ai_summary(self, title: str, summary: str):
+        from GUI.ai_summary_dialog import AISummaryDialog
+        dlg = AISummaryDialog(self, f"AI Summary - {title}", summary)
+        dlg.ShowModal()
+        dlg.Destroy()
+
+    def on_upload_asset(self, event):
+        """Upload an asset to this release."""
+        dlg = wx.FileDialog(self, "Select release asset", style=wx.FD_OPEN | wx.FD_FILE_MUST_EXIST)
+        if dlg.ShowModal() != wx.ID_OK:
+            dlg.Destroy()
+            return
+        path = dlg.GetPath()
+        dlg.Destroy()
+
+        def do_upload():
+            asset = self.account.upload_release_asset(self.repo.owner, self.repo.name, self.release.id, path)
+            wx.CallAfter(done, asset)
+
+        def done(asset):
+            if asset:
+                fresh = self.account.get_release(self.repo.owner, self.repo.name, self.release.id)
+                if fresh:
+                    self.release = fresh
+                    self.update_assets_list()
+                    self.update_buttons()
+                wx.MessageBox("Asset uploaded.", "Upload Asset", wx.OK | wx.ICON_INFORMATION)
+            else:
+                wx.MessageBox(self.account.get_last_error() or "Upload failed.", "Upload Asset", wx.OK | wx.ICON_ERROR)
+
+        threading.Thread(target=do_upload, daemon=True).start()
+
+    def on_delete_asset(self, event):
+        """Delete the selected release asset."""
+        asset = self.get_selected_asset()
+        if not asset:
+            return
+        result = wx.MessageBox(f"Delete asset {asset.name}?", "Delete Asset", wx.YES_NO | wx.ICON_WARNING)
+        if result != wx.YES:
+            return
+
+        def do_delete():
+            ok = self.account.delete_release_asset(self.repo.owner, self.repo.name, asset.id)
+            wx.CallAfter(done, ok)
+
+        def done(ok):
+            if ok:
+                fresh = self.account.get_release(self.repo.owner, self.repo.name, self.release.id)
+                if fresh:
+                    self.release = fresh
+                    self.update_assets_list()
+                    self.update_buttons()
+                wx.MessageBox("Asset deleted.", "Delete Asset", wx.OK | wx.ICON_INFORMATION)
+            else:
+                wx.MessageBox(self.account.get_last_error() or "Delete failed.", "Delete Asset", wx.OK | wx.ICON_ERROR)
+
+        threading.Thread(target=do_delete, daemon=True).start()
+
     def on_key(self, event):
         """Handle key events."""
         key = event.GetKeyCode()
@@ -530,3 +699,84 @@ class ViewReleaseDialog(wx.Dialog):
     def on_close(self, event):
         """Close dialog."""
         self.EndModal(wx.ID_CLOSE)
+
+
+class ReleaseEditDialog(wx.Dialog):
+    """Create or edit a release."""
+
+    def __init__(self, parent, repo: Repository, release: Release | None = None):
+        self.repo = repo
+        self.release = release
+        self.app = get_app()
+        self.account = self.app.currentAccount
+        title = "Edit Release" if release else "New Release"
+        wx.Dialog.__init__(self, parent, title=title, size=(720, 560))
+        self.init_ui()
+        theme.apply_theme(self)
+
+    def init_ui(self):
+        panel = wx.Panel(self)
+        main = wx.BoxSizer(wx.VERTICAL)
+
+        main.Add(wx.StaticText(panel, label="&Tag:"), 0, wx.LEFT | wx.RIGHT | wx.TOP, 10)
+        self.tag_txt = wx.TextCtrl(panel, value=self.release.tag_name if self.release else "")
+        main.Add(self.tag_txt, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.EXPAND, 10)
+        if self.release:
+            self.tag_txt.Enable(False)
+
+        main.Add(wx.StaticText(panel, label="&Name:"), 0, wx.LEFT | wx.RIGHT, 10)
+        self.name_txt = wx.TextCtrl(panel, value=self.release.name if self.release else "")
+        main.Add(self.name_txt, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.EXPAND, 10)
+
+        main.Add(wx.StaticText(panel, label="Release &notes:"), 0, wx.LEFT | wx.RIGHT, 10)
+        self.body_txt = wx.TextCtrl(panel, value=self.release.body if self.release else "", style=wx.TE_MULTILINE)
+        main.Add(self.body_txt, 1, wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.EXPAND, 10)
+
+        self.draft_cb = wx.CheckBox(panel, label="Draft")
+        self.draft_cb.SetValue(bool(self.release.draft) if self.release else False)
+        main.Add(self.draft_cb, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM, 10)
+
+        self.prerelease_cb = wx.CheckBox(panel, label="Pre-release")
+        self.prerelease_cb.SetValue(bool(self.release.prerelease) if self.release else False)
+        main.Add(self.prerelease_cb, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM, 10)
+
+        buttons = wx.BoxSizer(wx.HORIZONTAL)
+        self.save_btn = wx.Button(panel, wx.ID_OK, "&Save")
+        self.cancel_btn = wx.Button(panel, wx.ID_CANCEL, "&Cancel")
+        buttons.Add(self.save_btn, 0, wx.RIGHT, 8)
+        buttons.Add(self.cancel_btn, 0)
+        main.Add(buttons, 0, wx.ALL | wx.ALIGN_CENTER, 10)
+        panel.SetSizer(main)
+        self.save_btn.Bind(wx.EVT_BUTTON, self.on_save)
+
+    def on_save(self, event):
+        tag = self.tag_txt.GetValue().strip()
+        if not tag:
+            wx.MessageBox("Tag is required.", "Release", wx.OK | wx.ICON_WARNING)
+            return
+
+        if self.release:
+            result = self.account.update_release(
+                self.repo.owner,
+                self.repo.name,
+                self.release.id,
+                name=self.name_txt.GetValue().strip() or tag,
+                body=self.body_txt.GetValue(),
+                draft=self.draft_cb.GetValue(),
+                prerelease=self.prerelease_cb.GetValue(),
+            )
+        else:
+            result = self.account.create_release(
+                self.repo.owner,
+                self.repo.name,
+                tag_name=tag,
+                name=self.name_txt.GetValue().strip() or tag,
+                body=self.body_txt.GetValue(),
+                draft=self.draft_cb.GetValue(),
+                prerelease=self.prerelease_cb.GetValue(),
+            )
+
+        if not result:
+            wx.MessageBox(self.account.get_last_error() or "Release save failed.", "Release", wx.OK | wx.ICON_ERROR)
+            return
+        self.EndModal(wx.ID_OK)

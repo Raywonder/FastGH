@@ -210,6 +210,74 @@ class RepoSyncConfigDialog(wx.Dialog):
         self.EndModal(wx.ID_OK)
 
 
+class RepositorySettingsDialog(wx.Dialog):
+    """Edit repository settings for GitHub-compatible services."""
+
+    def __init__(self, parent, repo: Repository):
+        self.repo = repo
+        self.app = get_app()
+        self.account = self.app.currentAccount
+        wx.Dialog.__init__(self, parent, title=f"Repository Settings: {repo.full_name}", size=(640, 440))
+        self.init_ui()
+        theme.apply_theme(self)
+
+    def init_ui(self):
+        panel = wx.Panel(self)
+        main = wx.BoxSizer(wx.VERTICAL)
+
+        main.Add(wx.StaticText(panel, label="&Description:"), 0, wx.LEFT | wx.RIGHT | wx.TOP, 10)
+        self.description_txt = wx.TextCtrl(panel, value=self.repo.description or "")
+        main.Add(self.description_txt, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.EXPAND, 10)
+
+        self.private_cb = wx.CheckBox(panel, label="Private repository")
+        self.private_cb.SetValue(bool(self.repo.private))
+        main.Add(self.private_cb, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM, 10)
+
+        self.archived_cb = wx.CheckBox(panel, label="Archived")
+        self.archived_cb.SetValue(bool(self.repo.archived))
+        main.Add(self.archived_cb, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM, 10)
+
+        self.has_issues_cb = wx.CheckBox(panel, label="Issues enabled")
+        self.has_issues_cb.SetValue(bool(self.repo.has_issues))
+        main.Add(self.has_issues_cb, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM, 10)
+
+        main.Add(wx.StaticText(panel, label="Default &branch:"), 0, wx.LEFT | wx.RIGHT, 10)
+        self.default_branch_txt = wx.TextCtrl(panel, value=self.repo.default_branch or "")
+        main.Add(self.default_branch_txt, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.EXPAND, 10)
+
+        note = wx.StaticText(panel, label="Changing visibility, archive state, or default branch may require owner/admin permission on the selected service.")
+        main.Add(note, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM, 10)
+        main.AddStretchSpacer()
+
+        buttons = wx.BoxSizer(wx.HORIZONTAL)
+        self.save_btn = wx.Button(panel, wx.ID_OK, "&Save")
+        self.cancel_btn = wx.Button(panel, wx.ID_CANCEL, "&Cancel")
+        buttons.Add(self.save_btn, 0, wx.RIGHT, 8)
+        buttons.Add(self.cancel_btn, 0)
+        main.Add(buttons, 0, wx.ALL | wx.ALIGN_CENTER, 10)
+        panel.SetSizer(main)
+        self.save_btn.Bind(wx.EVT_BUTTON, self.on_save)
+
+    def on_save(self, event):
+        fields = {
+            "description": self.description_txt.GetValue(),
+            "private": self.private_cb.GetValue(),
+            "archived": self.archived_cb.GetValue(),
+            "has_issues": self.has_issues_cb.GetValue(),
+        }
+        branch = self.default_branch_txt.GetValue().strip()
+        if branch:
+            fields["default_branch"] = branch
+
+        updated = self.account.update_repository(self.repo.owner, self.repo.name, **fields)
+        if not updated:
+            wx.MessageBox(self.account.get_last_error() or "Repository update failed.", "Repository Settings", wx.OK | wx.ICON_ERROR)
+            return
+        self.repo = updated
+        wx.MessageBox("Repository settings saved.", "Repository Settings", wx.OK | wx.ICON_INFORMATION)
+        self.EndModal(wx.ID_OK)
+
+
 class ViewRepoDialog(wx.Dialog):
     """Dialog for viewing repository details."""
 
@@ -324,6 +392,12 @@ class ViewRepoDialog(wx.Dialog):
         self.releases_btn = wx.Button(self.panel, -1, "View &Releases")
         btn_row2.Add(self.releases_btn, 0, wx.RIGHT, 5)
 
+        self.settings_btn = wx.Button(self.panel, -1, "Repository Settin&gs")
+        btn_row2.Add(self.settings_btn, 0, wx.RIGHT, 5)
+
+        self.summary_btn = wx.Button(self.panel, -1, "AI S&ummary")
+        btn_row2.Add(self.summary_btn, 0, wx.RIGHT, 5)
+
         self.forks_btn = wx.Button(self.panel, -1, "View F&orks")
         btn_row2.Add(self.forks_btn, 0, wx.RIGHT, 5)
 
@@ -355,6 +429,8 @@ class ViewRepoDialog(wx.Dialog):
         self.commits_btn.Bind(wx.EVT_BUTTON, self.on_view_commits)
         self.actions_btn.Bind(wx.EVT_BUTTON, self.on_view_actions)
         self.releases_btn.Bind(wx.EVT_BUTTON, self.on_view_releases)
+        self.settings_btn.Bind(wx.EVT_BUTTON, self.on_repo_settings)
+        self.summary_btn.Bind(wx.EVT_BUTTON, self.on_ai_summary)
         self.forks_btn.Bind(wx.EVT_BUTTON, self.on_view_forks)
         self.owner_btn.Bind(wx.EVT_BUTTON, self.on_view_owner)
         self.close_btn.Bind(wx.EVT_BUTTON, self.on_close)
@@ -365,6 +441,46 @@ class ViewRepoDialog(wx.Dialog):
             self.on_close(None)
         else:
             event.Skip()
+
+    def on_ai_summary(self, event):
+        """Generate a short AI summary for this repository."""
+        details = "\n".join([
+            f"Name: {self.repo.full_name}",
+            f"Description: {self.repo.description or 'No description'}",
+            f"Language: {self.repo.language or 'Not specified'}",
+            f"Stars: {self.repo.stars}",
+            f"Forks: {self.repo.forks}",
+            f"Open issues: {self.repo.open_issues}",
+            f"Visibility: {'Private' if self.repo.private else 'Public'}",
+            f"Default branch: {getattr(self.repo, 'default_branch', '') or 'Not specified'}",
+            f"Archived: {'Yes' if getattr(self.repo, 'archived', False) else 'No'}",
+            f"URL: {self.repo.html_url}",
+        ])
+        progress = wx.ProgressDialog(
+            "AI Summary",
+            "Generating repository summary...",
+            maximum=100,
+            parent=self,
+            style=wx.PD_APP_MODAL | wx.PD_AUTO_HIDE,
+        )
+
+        def do_summary():
+            try:
+                from ai_summary import summarize_text
+                summary = summarize_text(self.app.prefs, f"Repository {self.repo.full_name}", details)
+                wx.CallAfter(self._show_ai_summary, summary)
+            except Exception as e:
+                wx.CallAfter(wx.MessageBox, str(e), "AI Summary Error", wx.OK | wx.ICON_ERROR)
+            finally:
+                wx.CallAfter(progress.Destroy)
+
+        threading.Thread(target=do_summary, daemon=True).start()
+
+    def _show_ai_summary(self, summary: str):
+        from GUI.ai_summary_dialog import AISummaryDialog
+        dlg = AISummaryDialog(self, f"AI Summary - {self.repo.full_name}", summary)
+        dlg.ShowModal()
+        dlg.Destroy()
 
     def check_status(self):
         """Check star/watch status in background."""
@@ -486,7 +602,7 @@ class ViewRepoDialog(wx.Dialog):
 
     def on_copy_clone(self, event):
         """Copy git clone URL to clipboard."""
-        clone_url = f"https://github.com/{self.repo.full_name}.git"
+        clone_url = self.repo.clone_url or f"{self.account.web_base_url}/{self.repo.full_name}.git"
         if wx.TheClipboard.Open():
             wx.TheClipboard.SetData(wx.TextDataObject(clone_url))
             wx.TheClipboard.Close()
@@ -533,7 +649,7 @@ class ViewRepoDialog(wx.Dialog):
             return
 
         git_path = self.app.prefs.git_path
-        clone_url = f"https://github.com/{self.repo.full_name}.git"
+        clone_url = self.repo.clone_url or f"{self.account.web_base_url}/{self.repo.full_name}.git"
         use_org_structure = self.app.prefs.git_use_org_structure
         use_recursive = self.app.prefs.git_clone_recursive
 
@@ -764,6 +880,15 @@ class ViewRepoDialog(wx.Dialog):
         from GUI.releases import ReleasesDialog
         dlg = ReleasesDialog(self, self.repo)
         dlg.ShowModal()
+        dlg.Destroy()
+
+    def on_repo_settings(self, event):
+        """Open repository settings dialog."""
+        dlg = RepositorySettingsDialog(self, self.repo)
+        result = dlg.ShowModal()
+        if result == wx.ID_OK:
+            self.repo = dlg.repo
+            self.desc_text.SetValue(self.repo.description or "No description")
         dlg.Destroy()
 
     def on_view_forks(self, event):
